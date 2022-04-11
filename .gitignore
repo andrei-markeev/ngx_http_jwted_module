@@ -1,0 +1,3 @@
+*.pem
+*.rest
+jwt_key.conf

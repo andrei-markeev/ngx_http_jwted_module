@@ -1,0 +1,26 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "/usr/local/openresty/openssl111/include",
+                "/usr/local/openresty/pcre/include",
+                "/build/openresty-1.19.9.1/build/nginx-1.19.9/objs",
+                "/build/openresty-1.19.9.1/build/nginx-1.19.9/src/core",
+                "/build/openresty-1.19.9.1/build/nginx-1.19.9/src/http",
+                "/build/openresty-1.19.9.1/build/nginx-1.19.9/src/http/v2",
+                "/build/openresty-1.19.9.1/build/nginx-1.19.9/src/http/modules",
+                "/build/openresty-1.19.9.1/build/nginx-1.19.9/src/event",
+                "/build/openresty-1.19.9.1/build/nginx-1.19.9/src/os/unix"
+            ],
+            "defines": [],
+            "compilerPath": "/usr/bin/gcc",
+            "cStandard": "gnu17",
+            "cppStandard": "gnu++14",
+            "intelliSenseMode": "linux-gcc-x64",
+            "browse": {}
+        }
+    ],
+    "version": 4
+}
