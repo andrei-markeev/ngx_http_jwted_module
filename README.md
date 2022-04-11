@@ -31,12 +31,12 @@ http {
             auth_jwt on;
             content_by_lua_block {
                 ngx.say('Protected endpoint')
-            };
+            }
         }
         location = /hello {
             content_by_lua_block {
                 ngx.say('Hello world!')
-            };
+            }
         }
     }
 }
