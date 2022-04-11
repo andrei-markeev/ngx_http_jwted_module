@@ -1,11 +1,15 @@
-## Key generation
+## Keys generation
 
 ```bash
 openssl genpkey -algorithm ed25519 -outform PEM -out test.pem
 openssl pkey -in test/test.pem -noout -text_pub | sed 1,2d | tr -d '\n\r :' | xxd -r -p | base64  # put to nginx.conf
 ```
 
-## Create a signed JWT token
+This will also produce `test.pem`, which is used for signing.
+
+## Create a signed EdDSA JWT token
+
+With Javascript:
 
 ```js
 var jose = require("jose");
@@ -27,9 +31,9 @@ echo -n '{"sub":"test","exp":1649637133}' | base64 -w 0 | sed s/\+/-/ | sed -E s
 openssl pkeyutl -sign -inkey test.pem -out sig.dat -rawin -in jwt
 ```
 
-### Test
+### How to test
 
 ```bash
 # put the real token instead of X.Y.Z
-curl -H "Authorization: Bearer X.Y.Z" localhost/test
+curl -H "Authorization: Bearer X.Y.Z" localhost/protected
 ```

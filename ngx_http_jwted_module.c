@@ -140,11 +140,20 @@ static ngx_int_t ngx_http_jwted_handler(ngx_http_request_t *req)
 
     ngx_str_t binary_signature = decode_base64url(req, signature);
     if (binary_signature.len == 0) {
-        ngx_log_error(NGX_LOG_ERR, req->connection->log, 0, "Failed to decode signature!");
+        ngx_log_error(NGX_LOG_ERR, req->connection->log, 0, "Failed to decode signature");
+        return NGX_HTTP_UNAUTHORIZED;
+    }
+
+    if (conf->public_key.len == 0) {
+        ngx_log_error(NGX_LOG_ERR, req->connection->log, 0, "Public key was not specified! Please use `auth_jwt_key`");
         return NGX_HTTP_UNAUTHORIZED;
     }
 
     ngx_str_t binary_pubkey = decode_base64(req, conf->public_key);
+    if (binary_pubkey.len != 32) {
+        ngx_log_error(NGX_LOG_ERR, req->connection->log, 0, "`auth_jwt_key` has invalid value! It should be a 32 bytes Ed25519 public key, encoded in base64");
+        return NGX_HTTP_UNAUTHORIZED;
+    }
 
     EVP_PKEY *pkey;
     pkey = EVP_PKEY_new_raw_public_key(EVP_PKEY_ED25519, NULL, binary_pubkey.data, binary_pubkey.len);
