@@ -71,7 +71,7 @@ So if you want to check `exp`, you can do it like this:
 local cjson = require("cjson")
 local claims = cjson.decode(ngx.var.jwt_claims)
 
-if (claims.exp / 1000 < os.time()) then
+if (claims.exp < ngx.now()) then
     ngx.say("Token expired!")
     ngx.exit(ngx.HTTP_OK)
 end
