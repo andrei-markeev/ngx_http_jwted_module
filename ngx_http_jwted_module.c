@@ -4,10 +4,12 @@
 
 #include <openssl/evp.h>
 
+static ngx_int_t ngx_http_jwted_pre_conf(ngx_conf_t *cf);
 static ngx_int_t ngx_http_jwted_post_conf(ngx_conf_t *cf);
 static void *ngx_http_jwted_create_loc_conf(ngx_conf_t *cf);
 static char *ngx_http_jwted_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child);
 static ngx_int_t ngx_http_jwted_handler(ngx_http_request_t *req);
+static ngx_int_t ngx_http_jwted_claims_getter(ngx_http_request_t *req, ngx_http_variable_value_t *value, uintptr_t var_name);
 static ngx_str_t decode_base64(ngx_http_request_t *req, ngx_str_t b64_s);
 static ngx_str_t decode_base64url(ngx_http_request_t *req, ngx_str_t b64url_s);
 
@@ -16,6 +18,11 @@ typedef struct
     ngx_flag_t flag;
     ngx_str_t public_key;
 } ngx_http_jwted_loc_conf_t;
+
+typedef struct
+{
+    ngx_str_t claims_json;
+} ngx_http_jwted_data_t;
 
 static ngx_command_t ngx_http_jwted_commands[] = {
     {ngx_string("auth_jwt"),
@@ -33,7 +40,7 @@ static ngx_command_t ngx_http_jwted_commands[] = {
     ngx_null_command};
 
 static ngx_http_module_t ngx_http_jwted_module_ctx = {
-    NULL, // preconfiguration
+    ngx_http_jwted_pre_conf,
     ngx_http_jwted_post_conf,
     NULL, // create main configuration
     NULL, // init main configuration
@@ -55,6 +62,18 @@ ngx_module_t ngx_http_jwted_module = {
     NULL, // exit process
     NULL, // exit master
     NGX_MODULE_V1_PADDING};
+
+ngx_str_t var_name_jwt_claim = ngx_string("jwt_claims");
+static ngx_int_t ngx_http_jwted_pre_conf(ngx_conf_t *cf)
+{
+    ngx_http_variable_t* var = ngx_http_add_variable(cf, &var_name_jwt_claim, 0);
+    if (var == NULL)
+        return NGX_ERROR;
+    var->get_handler = ngx_http_jwted_claims_getter;
+    var->data = 0;
+
+    return NGX_OK;
+}
 
 static ngx_int_t ngx_http_jwted_post_conf(ngx_conf_t *cf)
 {
@@ -132,7 +151,7 @@ static ngx_int_t ngx_http_jwted_handler(ngx_http_request_t *req)
 
     ngx_str_t payload;
     payload.data = token.data;
-    payload.len = (p_last_dot - token.data);
+    payload.len = p_last_dot - token.data;
 
     ngx_str_t signature;
     signature.data = p_last_dot + 1;
@@ -190,7 +209,48 @@ static ngx_int_t ngx_http_jwted_handler(ngx_http_request_t *req)
 
     EVP_PKEY_free(pkey);
     EVP_MD_CTX_free(ctx);
+
+    u_char *p_dot = ngx_strlchr(payload.data, payload.data + payload.len, '.');
+    if (p_dot == NULL)
+        return NGX_HTTP_UNAUTHORIZED;
+
+    ngx_str_t claims;
+    claims.data = p_dot + 1;
+    claims.len = payload.data + payload.len - p_dot - 1;
+    ngx_str_t decoded_claims = decode_base64url(req, claims);
+    if (decoded_claims.len == 0)
+    {
+        ngx_log_error(NGX_LOG_ERR, req->connection->log, 0, "Failed to decode claims part of the token");
+        return NGX_HTTP_INTERNAL_SERVER_ERROR;
+    }
+
+    ngx_http_jwted_data_t *module_ctx_data = ngx_pcalloc(req->pool, sizeof(*module_ctx_data));
+    if (ctx == NULL)
+    {
+        ngx_log_error(NGX_LOG_ERR, req->connection->log, 0, "Failed to allocate module context");
+        return NGX_HTTP_INTERNAL_SERVER_ERROR;
+    }
+
+    module_ctx_data->claims_json = decoded_claims;
+    ngx_http_set_ctx(req, module_ctx_data, ngx_http_jwted_module);
+
     return NGX_DECLINED;
+}
+
+static ngx_int_t ngx_http_jwted_claims_getter(ngx_http_request_t *req, ngx_http_variable_value_t *value, uintptr_t var_name)
+{
+    ngx_http_jwted_data_t *data = ngx_http_get_module_ctx(req, ngx_http_jwted_module);
+    value->not_found = 1;
+
+    if (data == NULL || data->claims_json.len == 0)
+        return NGX_OK;
+
+    value->not_found = 0;
+    value->data = data->claims_json.data;
+    value->len = data->claims_json.len;
+    value->valid = 1;
+
+    return NGX_OK;
 }
 
 static ngx_str_t decode_base64(ngx_http_request_t *req, ngx_str_t b64_s)

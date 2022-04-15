@@ -44,6 +44,41 @@ http {
 
 How to generate keys and create JWT tokens: see [test/README.md](test/README.md).
 
+### Claims verification
+
+This module exposes claims part of the token in variable `$jwt_claims`. It doesn't parse the JSON and it doesn't verify any claims itself.
+
+For example, for this location:
+```nginx
+location = /show-claims {
+    auth_jwt on;
+    content_by_lua_block {
+        ngx.say('JWT claims: ' .. ngx.var.jwt_claims)
+    }
+}
+```
+
+It might show something like this:
+```bash
+$ curl -H "Authorization: Bearer $TOKEN" localhost/show-claims
+
+JWT claims: {"sub":"test","exp":1649637133}
+```
+
+So if you want to check `exp`, you can do it like this:
+
+```lua
+local cjson = require("cjson")
+local claims = cjson.decode(ngx.var.jwt_claims)
+
+if (claims.exp / 1000 < os.time()) then
+    ngx.say("Token expired!")
+    ngx.exit(ngx.HTTP_OK)
+end
+```
+
+_Note_: JWT parsing works in access phase, so `$jwt_claims` variable is only available after that.
+
 ### Contributions
 
 Contributions are welcome, however, it would be great to keep this module small, efficient and with no external dependencies 🙏.
