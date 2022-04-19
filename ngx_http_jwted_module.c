@@ -10,8 +10,6 @@ static void *ngx_http_jwted_create_loc_conf(ngx_conf_t *cf);
 static char *ngx_http_jwted_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child);
 static ngx_int_t ngx_http_jwted_handler(ngx_http_request_t *req);
 static ngx_int_t ngx_http_jwted_claims_getter(ngx_http_request_t *req, ngx_http_variable_value_t *value, uintptr_t var_name);
-static ngx_str_t decode_base64(ngx_http_request_t *req, ngx_str_t b64_s);
-static ngx_str_t decode_base64url(ngx_http_request_t *req, ngx_str_t b64url_s);
 
 typedef struct
 {
@@ -157,20 +155,40 @@ static ngx_int_t ngx_http_jwted_handler(ngx_http_request_t *req)
     signature.data = p_last_dot + 1;
     signature.len = token.len - payload.len - 1;
 
-    ngx_str_t binary_signature = decode_base64url(req, signature);
-    if (binary_signature.len == 0) {
-        ngx_log_error(NGX_LOG_ERR, req->connection->log, 0, "Failed to decode signature");
-        return NGX_HTTP_UNAUTHORIZED;
-    }
-
     if (conf->public_key.len == 0) {
         ngx_log_error(NGX_LOG_ERR, req->connection->log, 0, "Public key was not specified! Please use `auth_jwt_key`");
         return NGX_HTTP_UNAUTHORIZED;
     }
 
-    ngx_str_t binary_pubkey = decode_base64(req, conf->public_key);
-    if (binary_pubkey.len != 32) {
+    ngx_str_t binary_pubkey;
+    binary_pubkey.len = ngx_base64_decoded_length(conf->public_key.len);
+    binary_pubkey.data = ngx_pcalloc(req->pool, binary_pubkey.len);
+    if (binary_pubkey.data == NULL)
+    {
+        ngx_log_error(NGX_LOG_ERR, req->connection->log, 0, "Failed to allocate memory for decoding public key");
+        return NGX_HTTP_INTERNAL_SERVER_ERROR;
+    }
+
+    ngx_int_t decode_result = ngx_decode_base64(&binary_pubkey, &conf->public_key);
+    if (decode_result == NGX_ERROR)
+    {
         ngx_log_error(NGX_LOG_ERR, req->connection->log, 0, "`auth_jwt_key` has invalid value! It should be a 32 bytes Ed25519 public key, encoded in base64");
+        return NGX_HTTP_UNAUTHORIZED;
+    }
+
+    ngx_str_t binary_signature;
+    binary_signature.len = ngx_base64_decoded_length(signature.len);
+    binary_signature.data = ngx_pcalloc(req->pool, binary_signature.len);
+    if (binary_signature.data == NULL)
+    {
+        ngx_log_error(NGX_LOG_ERR, req->connection->log, 0, "Failed to allocate memory for decoding JWT token signature");
+        return NGX_HTTP_INTERNAL_SERVER_ERROR;
+    }
+
+    decode_result = ngx_decode_base64url(&binary_signature, &signature);
+    if (decode_result == NGX_ERROR)
+    {
+        ngx_log_error(NGX_LOG_ERR, req->connection->log, 0, "Failed to decode JWT token signature, invalid input");
         return NGX_HTTP_UNAUTHORIZED;
     }
 
@@ -217,10 +235,20 @@ static ngx_int_t ngx_http_jwted_handler(ngx_http_request_t *req)
     ngx_str_t claims;
     claims.data = p_dot + 1;
     claims.len = payload.data + payload.len - p_dot - 1;
-    ngx_str_t decoded_claims = decode_base64url(req, claims);
-    if (decoded_claims.len == 0)
+
+    ngx_str_t decoded_claims;
+    decoded_claims.len = ngx_base64_decoded_length(claims.len);
+    decoded_claims.data = ngx_pcalloc(req->pool, decoded_claims.len);
+    if (decoded_claims.data == NULL)
     {
-        ngx_log_error(NGX_LOG_ERR, req->connection->log, 0, "Failed to decode claims part of the token");
+        ngx_log_error(NGX_LOG_ERR, req->connection->log, 0, "Failed to allocate decoded claims");
+        return NGX_HTTP_INTERNAL_SERVER_ERROR;
+    }
+
+    decode_result = ngx_decode_base64url(&decoded_claims, &claims);
+    if (decode_result == NGX_ERROR)
+    {
+        ngx_log_error(NGX_LOG_ERR, req->connection->log, 0, "Failed to decode claims part of the token, even though signature verified");
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
 
@@ -251,44 +279,4 @@ static ngx_int_t ngx_http_jwted_claims_getter(ngx_http_request_t *req, ngx_http_
     value->valid = 1;
 
     return NGX_OK;
-}
-
-static ngx_str_t decode_base64(ngx_http_request_t *req, ngx_str_t b64_s)
-{
-    u_int padding = b64_s.len > 0 ? *(b64_s.data + b64_s.len - 1) == '=' : 0;
-    padding += b64_s.len > 1 ? *(b64_s.data + b64_s.len - 2) == '=' : 0;
-
-    u_int buf_size = 3 * b64_s.len / 4;
-    u_char *buf = ngx_pcalloc(req->pool, buf_size + 1);
-    int result = EVP_DecodeBlock(buf, b64_s.data, b64_s.len);
-
-    ngx_str_t decoded = ngx_null_string;
-    if (result <= 0)
-        return decoded;
-    decoded.data = buf;
-    decoded.len = result - padding;
-    return decoded;
-}
-
-static ngx_str_t decode_base64url(ngx_http_request_t *req, ngx_str_t b64url_s)
-{
-    ngx_str_t b64_s;
-    int padding = b64url_s.len % 4 == 0 ? 0 : 4 - b64url_s.len % 4;
-    b64_s.len = b64url_s.len + padding;
-    b64_s.data = ngx_pcalloc(req->pool, b64_s.len);
-
-    uint i;
-    for (i = 0; i < b64_s.len; i++)
-    {
-        if (i >= b64url_s.len)
-            b64_s.data[i] = '=';
-        else if (b64url_s.data[i] == '-')
-            b64_s.data[i] = '+';
-        else if (b64url_s.data[i] == '_')
-            b64_s.data[i] = '/';
-        else
-            b64_s.data[i] = b64url_s.data[i];
-    }
-
-    return decode_base64(req, b64_s);
 }
