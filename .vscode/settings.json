@@ -8,6 +8,7 @@
         "type_traits": "c",
         "utility": "c",
         "ecdsa.h": "c",
-        "ec.h": "c"
+        "ec.h": "c",
+        "ngx_config.h": "c"
     }
 }
