@@ -135,7 +135,7 @@ auth_jwt_cache on size=1m;
 
 Turns on JWT protection for the specific location.
 
-If "on" value is provided, Bearer-token from `Authorization` header is used, otherwise, the token is  by evaluating the ***expression*** at the time of handling the request. For example, in order to get the token from `auth` cookie, use
+If "on" value is provided, Bearer-token from `Authorization` header is used, otherwise, the token is obtained by evaluating the ***expression*** at the time of handling the request. For example, in order to get the token from `auth` cookie, use
 
 ```nginx
 auth_jwt $cookie_auth;
