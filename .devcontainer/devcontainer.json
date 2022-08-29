@@ -13,11 +13,14 @@
 	"settings": {},
 
 	// Add the IDs of extensions you want installed when the container is created.
-	"extensions": [],
+	"extensions": [
+		"ms-vscode.cpptools",
+		"humao.rest-client"
+	],
 
 	// Comment out to connect as root instead. More info: https://aka.ms/vscode-remote/containers/non-root.
 	"remoteUser": "vscode",
 
     // This is only needed when using Linux Containers on Windows
-    "workspaceMount": "type=bind,source=/mnt/c/my/Projects/$project,target=/workspaces/$project,consistency=cached"
+    "workspaceMount": "type=bind,source=/mnt/c/my/Projects/${localWorkspaceFolderBasename},target=${containerWorkspaceFolder},consistency=cached"
 }

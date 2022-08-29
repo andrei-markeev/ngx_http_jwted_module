@@ -1,6 +1,6 @@
 # Nginx JWT validation with Ed25519
 
-EdDSA algorithms are faster and more secure than traditional RSA and ESA.
+EdDSA algorithms are fast and more secure than traditional RSA and ESA.
 This module uses OpenSSL implementation of Ed25519 algorithm for verifying JWT Bearer tokens from Authorization header.
 
 ## Compiling with Nginx
@@ -127,7 +127,7 @@ auth_jwt_cache on size=1m;
 
 ### auth_jwt
 
-**syntax**: _auth_jwt on|off_
+**syntax**: _auth_jwt on|**(expression)**|off_
 
 **default**: _auth_jwt off_
 
@@ -135,8 +135,14 @@ auth_jwt_cache on size=1m;
 
 Turns on JWT protection for the specific location.
 
-Bearer-token from `Authorization` header will be verified against the public key specified by `auth_jwt_key` directive.
-Verification of the token happens during access [phase](http://nginx.org/en/docs/dev/development_guide.html#http_phases).
+If "on" value is provided, Bearer-token from `Authorization` header is used, otherwise, the token is  by evaluating the ***expression*** at the time of handling the request. For example, in order to get the token from `auth` cookie, use
+
+```nginx
+auth_jwt $cookie_auth;
+```
+
+Token will be verified against the public key specified by `auth_jwt_key` directive.
+Verification of the token happens during the access [phase](http://nginx.org/en/docs/dev/development_guide.html#http_phases).
 
 If the public key was not specified, `401 Authorization Required` will be returned and the following error will be logged:
 
@@ -144,12 +150,11 @@ If the public key was not specified, `401 Authorization Required` will be return
 Public key was not specified! Please use `auth_jwt_key`
 ```
 
-If the `Authorization` header is empty, contains invalid JWT token or the signature verification has failed, `401 Authorization Required` will be returned.
+If the `Authorization` header (or the value specified by ***expression***) is empty, contains invalid JWT token, or if the signature verification has failed, `401 Authorization Required` will be returned.
 
 **Note**: This library doesn't parse the token payload and doesn't perform any claims checks, it only puts the claims JSON into `$jwt_claims` variable. For example, it doesn't validate `exp` claim, you have to do it yourself if needed.
 
-**Note 2**: Only **EdDSA** algorithm with _Ed25519_ curve is currently supported and also enforced, value of `alg` specified in the header is
-ignored.
+**Note 2**: Only **EdDSA** algorithm with _Ed25519_ curve is currently supported and also enforced, value of `alg` specified in the header is ignored.
 
 ### auth_jwt_key
 

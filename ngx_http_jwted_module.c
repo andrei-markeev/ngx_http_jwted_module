@@ -10,6 +10,7 @@ static void *ngx_http_jwted_create_main_conf(ngx_conf_t *cf);
 static char *ngx_http_jwted_init_main_conf(ngx_conf_t *cf, void *conf);
 static void *ngx_http_jwted_create_loc_conf(ngx_conf_t *cf);
 static char *ngx_http_jwted_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child);
+static char *ngx_http_jwted_set(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 static char *ngx_http_jwted_set_cache(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 static ngx_int_t ngx_http_jwted_cache_zone_init(ngx_shm_zone_t *shm_zone, void *data);
 static ngx_int_t ngx_http_jwted_handler(ngx_http_request_t *req);
@@ -27,7 +28,8 @@ typedef struct
 
 typedef struct
 {
-    ngx_flag_t flag;
+    ngx_int_t flag;
+    ngx_http_complex_value_t *token_cv;
     ngx_str_t public_key;
 } ngx_http_jwted_loc_conf_t;
 
@@ -52,7 +54,7 @@ typedef struct
 static ngx_command_t ngx_http_jwted_commands[] = {
     {ngx_string("auth_jwt"),
      NGX_HTTP_LOC_CONF | NGX_CONF_TAKE1,
-     ngx_conf_set_flag_slot,
+     ngx_http_jwted_set,
      NGX_HTTP_LOC_CONF_OFFSET,
      offsetof(ngx_http_jwted_loc_conf_t, flag),
      NULL},
@@ -117,6 +119,43 @@ static ngx_int_t ngx_http_jwted_post_conf(ngx_conf_t *cf)
     *h = ngx_http_jwted_handler;
 
     return NGX_OK;
+}
+
+static char *ngx_http_jwted_set(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+{
+    ngx_http_jwted_loc_conf_t *loc_conf = conf;
+    ngx_str_t *value = cf->args->elts;
+
+    if (cf->args->nelts > 2) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "Only 1 argument is supported for `auth_jwt`");
+        return NGX_CONF_ERROR;
+    }
+
+    if (ngx_strcmp(value[1].data, "on") == 0)
+        loc_conf->flag = 1;
+    else if (ngx_strcmp(value[1].data, "off") == 0)
+        loc_conf->flag = 0;
+    else {
+        loc_conf->flag = 2;
+
+        loc_conf->token_cv = ngx_palloc(cf->pool, sizeof(ngx_http_complex_value_t));
+        if (loc_conf->token_cv == NULL) {
+            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "Failed to allocate memory for compiling complex argument of `auth_jwt`");
+            return NGX_CONF_ERROR;
+        }
+
+        ngx_http_compile_complex_value_t ccv;
+        ngx_memzero(&ccv, sizeof(ngx_http_compile_complex_value_t));
+
+        ccv.cf = cf;
+        ccv.value = &value[1];
+        ccv.complex_value = loc_conf->token_cv;
+
+        if (ngx_http_compile_complex_value(&ccv) != NGX_OK)
+            return NGX_CONF_ERROR;
+    }
+
+    return NGX_CONF_OK;
 }
 
 ngx_str_t cache_zone_name = ngx_string("jwted_cache");
@@ -246,7 +285,14 @@ static char *ngx_http_jwted_merge_loc_conf(ngx_conf_t *cf, void *parent, void *c
     ngx_http_jwted_loc_conf_t *prev = parent;
     ngx_http_jwted_loc_conf_t *next = child;
 
-    ngx_conf_merge_value(next->flag, prev->flag, 0);
+    if (next->flag == NGX_CONF_UNSET) {
+        if (prev->flag == NGX_CONF_UNSET)
+            next->flag = 0;
+        else {
+            next->flag = prev->flag;
+            next->token_cv = prev->token_cv;
+        }
+    }
     ngx_conf_merge_str_value(next->public_key, prev->public_key, "");
 
     return NGX_CONF_OK;
@@ -263,15 +309,25 @@ static ngx_int_t ngx_http_jwted_handler(ngx_http_request_t *req)
     if (req->method == NGX_HTTP_OPTIONS)
         return NGX_DECLINED;
 
-    if (!req->headers_in.authorization)
-        return NGX_HTTP_UNAUTHORIZED;
-
-    if (ngx_strncmp(req->headers_in.authorization->value.data, "Bearer ", 7) != 0)
-        return NGX_HTTP_UNAUTHORIZED;
-
     ngx_str_t token;
-    token.data = req->headers_in.authorization->value.data + 7;
-    token.len = req->headers_in.authorization->value.len - 7;
+    if (conf->flag == 1) {
+        if (!req->headers_in.authorization)
+            return NGX_HTTP_UNAUTHORIZED;
+
+        if (ngx_strncmp(req->headers_in.authorization->value.data, "Bearer ", 7) != 0)
+            return NGX_HTTP_UNAUTHORIZED;
+
+        token.data = req->headers_in.authorization->value.data + 7;
+        token.len = req->headers_in.authorization->value.len - 7;
+    } else {
+        if (ngx_http_complex_value(req, conf->token_cv, &token) != NGX_OK) {
+            ngx_log_error(NGX_LOG_ERR, req->connection->log, 0, "Failed to get token from the complex variable defined by `auth_jwt`");
+            return NGX_HTTP_UNAUTHORIZED;
+        }
+
+        if (token.len == 0)
+            return NGX_HTTP_UNAUTHORIZED;
+    }
 
     u_char *p_last_dot = token.data + token.len;
     while (p_last_dot > token.data)
